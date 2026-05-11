@@ -260,13 +260,28 @@ func (v *ModeValidator) validateCopyMode() error {
 	return nil
 }
 
-// validateTableMode validates the table mode flags
+// validateTableMode validates the table mode flags. Exactly one of
+// --truncate, --append, --skip-existing must be set, unless the copy is in
+// --metadata-only / --global-metadata-only mode (where table-data handling
+// is irrelevant).
 func (v *ModeValidator) validateTableMode() error {
-	if !utils.MustGetFlagBool(option.METADATA_ONLY) &&
-		!utils.MustGetFlagBool(option.GLOBAL_METADATA_ONLY) &&
-		!utils.MustGetFlagBool(option.TRUNCATE) &&
-		!utils.MustGetFlagBool(option.APPEND) {
-		return &ValidationError{"One and only one of the following flags must be specified: truncate, append"}
+	if utils.MustGetFlagBool(option.METADATA_ONLY) ||
+		utils.MustGetFlagBool(option.GLOBAL_METADATA_ONLY) {
+		return nil
+	}
+	flags := []bool{
+		utils.MustGetFlagBool(option.TRUNCATE),
+		utils.MustGetFlagBool(option.APPEND),
+		utils.MustGetFlagBool(option.SKIP_EXISTING),
+	}
+	n := 0
+	for _, f := range flags {
+		if f {
+			n++
+		}
+	}
+	if n != 1 {
+		return &ValidationError{"One and only one of the following flags must be specified: --truncate, --append, --skip-existing"}
 	}
 	return nil
 }

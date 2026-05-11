@@ -125,6 +125,7 @@ func (app *Application) SetFlagDefaults(flagSet *pflag.FlagSet) {
 	flagSet.String(option.SOURCE_HOST, "127.0.0.1", "The host of source cluster")
 	flagSet.Int(option.SOURCE_PORT, 5432, "The port of source cluster")
 	flagSet.String(option.SOURCE_USER, "gpadmin", "The user of source cluster")
+	flagSet.Bool(option.SKIP_EXISTING, false, "Skip copying a table if it already exists in the destination database")
 	flagSet.Bool(option.TRUNCATE, false, "Truncate destination table if it exists prior to copying data")
 	flagSet.StringSlice(option.SCHEMA, []string{}, "The schema(s) to be copied, separated by commas, in the format database.schema")
 	flagSet.StringSlice(option.DEST_SCHEMA, []string{}, "The schema(s) in destination database to copy to, separated by commas")

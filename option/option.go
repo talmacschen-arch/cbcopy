@@ -40,6 +40,7 @@ const (
 	SOURCE_HOST             = "source-host"
 	SOURCE_PORT             = "source-port"
 	SOURCE_USER             = "source-user"
+	SKIP_EXISTING           = "skip-existing"
 	TRUNCATE                = "truncate"
 	VALIDATE                = "validate"
 	SCHEMA                  = "schema"
@@ -73,8 +74,9 @@ const (
 )
 
 const (
-	TableModeTruncate = "truncate"
-	TableModeAppend   = "append"
+	TableModeTruncate     = "truncate"
+	TableModeAppend       = "append"
+	TableModeSkipExisting = "skip-existing"
 )
 
 type DbTable struct {
@@ -171,6 +173,9 @@ func NewOption(initialFlags *pflag.FlagSet) (*Option, error) {
 
 	if append, _ := initialFlags.GetBool(APPEND); append {
 		tableMode = TableModeAppend
+	}
+	if skipExisting, _ := initialFlags.GetBool(SKIP_EXISTING); skipExisting {
+		tableMode = TableModeSkipExisting
 	}
 
 	ownerMap, err := getOwnerMap(initialFlags)
