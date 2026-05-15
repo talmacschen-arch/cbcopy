@@ -10,6 +10,7 @@ import (
 
 	"github.com/apache/cloudberry-go-libs/gplog"
 	"github.com/cloudberry-contrib/cbcopy/internal/dbconn"
+	"github.com/cloudberry-contrib/cbcopy/meta/builtin"
 	"github.com/cloudberry-contrib/cbcopy/option"
 	"github.com/cloudberry-contrib/cbcopy/utils"
 	"github.com/spf13/cobra"
@@ -125,6 +126,7 @@ func (app *Application) SetFlagDefaults(flagSet *pflag.FlagSet) {
 	flagSet.String(option.SOURCE_HOST, "127.0.0.1", "The host of source cluster")
 	flagSet.Int(option.SOURCE_PORT, 5432, "The port of source cluster")
 	flagSet.String(option.SOURCE_USER, "gpadmin", "The user of source cluster")
+	flagSet.Bool(option.SKIP_EXISTING, false, "Skip copying a table if it already exists in the destination database")
 	flagSet.Bool(option.TRUNCATE, false, "Truncate destination table if it exists prior to copying data")
 	flagSet.StringSlice(option.SCHEMA, []string{}, "The schema(s) to be copied, separated by commas, in the format database.schema")
 	flagSet.StringSlice(option.DEST_SCHEMA, []string{}, "The schema(s) in destination database to copy to, separated by commas")
@@ -184,6 +186,7 @@ func (app *Application) doSetup() {
 	var err error
 	config, err = option.NewOption(utils.CmdFlags)
 	gplog.FatalOnError(err)
+	builtin.SetOption(config)
 
 	gplog.Info("Establishing 1 source db management connection(s)...")
 	app.srcManageConn = app.initializeConnectionPool("postgres",
@@ -334,6 +337,14 @@ func (app *Application) doCopy() {
 		app.queryWrapper.ResetCache()
 
 		i++
+	}
+
+	// --skip-existing: emit a single summary line and persist the list of
+	// bypassed tables once all databases have been processed. No-ops when
+	// the option wasn't used or nothing was skipped.
+	builtin.LogSkipExistingSummary()
+	if err := builtin.WriteSkipExistingList(app.timestamp); err != nil {
+		gplog.Warn("[skip-existing] failed to write skip_existing.list: %v", err)
 	}
 
 	gplog.Info("Total elapsed time: %v", time.Since(start))

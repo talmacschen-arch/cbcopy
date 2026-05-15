@@ -20,6 +20,20 @@ var (
 	srcDBVersion  dbconn.GPDBVersion
 	destDBVersion dbconn.GPDBVersion
 
+	// srcDbName and destDbName name the source and destination databases
+	// currently being processed. Set by BuiltinMeta.Open; consumed by
+	// FilterTablesByDestExisting and the skip-existing recorder so each
+	// recorded entry knows which db pair it belongs to (relevant in
+	// multi-db copy modes like --full or --dbname db1,db2).
+	srcDbName  string
+	destDbName string
+
+	// runtimeOption is a handle to the global *option.Option used by
+	// non-pure-flag-driven decisions inside meta/builtin, primarily the
+	// --skip-existing existence check. Set by SetOption from the copy package
+	// once option.NewOption has produced an Option instance.
+	runtimeOption *option.Option
+
 	// --> automation test purpose, start
 	cmdFlags *pflag.FlagSet
 	// <-- automation test purpose, end
@@ -42,6 +56,13 @@ var (
 	destTablespace    string
 	destTablespaceMap map[string]string
 )
+
+// SetOption installs the runtime *option.Option for use by meta/builtin
+// helpers that need to consult Option state (e.g. --skip-existing existence
+// checks). Call after option.NewOption returns. Mirrors utils.SetCmdFlags.
+func SetOption(o *option.Option) {
+	runtimeOption = o
+}
 
 // --> automation test purpose, start
 func SetCmdFlags(flagSet *pflag.FlagSet) {

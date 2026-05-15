@@ -179,10 +179,12 @@ cbcopy supports seven migration modes.
 - `--global-metadata-only` - Migrate global objects from the source database to the destination database.
 
 ### Data Loading Modes
-cbcopy supports two data loading modes.
+cbcopy supports three data loading modes; exactly one must be specified
+(except in `--metadata-only` / `--global-metadata-only` mode):
 
 - `--append` - Insert the migrated records into the table directly, regardless of the existing records.
 - `--truncate` - First, clear the existing records in the table, and then insert the migrated records into the table.
+- `--skip-existing` - Skip copying a table from the source database if a table with the same fully qualified name already exists in the destination database. Aligned with gpcopy's option of the same name. The existence check is by FQN only; column definitions are not compared. For partitioned tables the check is by root-table FQN, so the entire partition tree is skipped when the root exists.
 
 ### Object dependencies
 
@@ -351,6 +353,7 @@ Flags:
       --quiet                            Suppress non-warning, non-error log messages
       --schema strings                   The schema(s) to be copied, separated by commas, in the format database.schema
       --schema-mapping-file string       Schema mapping file, The line format is "source_dbname.source_schema,dest_dbname.dest_schema"
+      --skip-existing                    Skip copying a table if it already exists in the destination database
       --source-host string               The host of source cluster (default "127.0.0.1")
       --source-port int                  The port of source cluster (default 5432)
       --source-user string               The user of source cluster (default "gpadmin")
