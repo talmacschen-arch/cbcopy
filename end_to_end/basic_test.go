@@ -479,4 +479,81 @@ var _ = Describe("Migration basic tests", func() {
 		}
 	})
 
+	It("emits pull-mode directions for CopyOnMaster (regression for issue #32)", func() {
+		// The previous {CopyOnMaster, pull} entry in the table-driven
+		// test above does not catch issue #32 because its --source-host
+		// and --dest-host come from the same env (both empty / same
+		// value), so a regression where pull silently routes through
+		// the push branch is invisible -- the data still copies on a
+		// single-cluster test bed. Here we pass deliberately distinct
+		// literal hostnames that still resolve to the same coordinator.
+		// Under pull, FormMasterHelperAddress returns --source-host
+		// (127.0.0.1) for the dest-side dialer, so the receive command
+		// must contain `--host 127.0.0.1`. Under push it would have
+		// contained `--host localhost`. Asserting on the debug log
+		// makes the divergence visible without needing two clusters.
+		const srcHostLiteral = "127.0.0.1"
+		const destHostLiteral = "localhost"
+
+		srcTestConn := testutils.SetupTestDbConn("source_db")
+		destTestConn := testutils.SetupTestDbConn("target_db")
+		defer srcTestConn.Close()
+		defer destTestConn.Close()
+
+		testhelper.AssertQueryRuns(srcTestConn, "CREATE TABLE public.cm_pull_table (i int)")
+		testhelper.AssertQueryRuns(srcTestConn, "INSERT INTO public.cm_pull_table SELECT generate_series(1,500)")
+		defer testhelper.AssertQueryRuns(srcTestConn, "DROP TABLE IF EXISTS public.cm_pull_table")
+
+		testhelper.AssertQueryRuns(destTestConn, "CREATE TABLE public.cm_pull_table (i int)")
+		defer testhelper.AssertQueryRuns(destTestConn, "DROP TABLE IF EXISTS public.cm_pull_table")
+
+		os.Setenv("TEST_COPY_STRATEGY", "CopyOnMaster")
+		defer os.Unsetenv("TEST_COPY_STRATEGY")
+
+		time.Sleep(1 * time.Second)
+
+		output := cbcopy(cbcopyPath,
+			"--debug",
+			"--source-host", srcHostLiteral,
+			"--source-port", strconv.Itoa(sourceConn.Port),
+			"--source-user", sourceConn.User,
+			"--dest-host", destHostLiteral,
+			"--dest-port", strconv.Itoa(destConn.Port),
+			"--dest-user", destConn.User,
+			"--include-table", "source_db.public.cm_pull_table",
+			"--dest-table", "target_db.public.cm_pull_table",
+			"--truncate",
+			"--connection-mode", "pull",
+		)
+
+		assertDataRestored(destTestConn, map[string]int{
+			"public.cm_pull_table": 500,
+		})
+
+		out := string(output)
+		sendLine := findLineContaining(out, "COPY command of sending data:")
+		recvLine := findLineContaining(out, "COPY command of receiving data:")
+		Expect(sendLine).NotTo(BeEmpty(), "expected to find 'COPY command of sending data:' in debug output:\n%s", out)
+		Expect(recvLine).NotTo(BeEmpty(), "expected to find 'COPY command of receiving data:' in debug output:\n%s", out)
+
+		// pull + CopyOnMaster: src master --listen sends, dest master
+		// dials src. Pre-fix code would emit the mirror image and these
+		// four assertions would each fail on a different token.
+		Expect(sendLine).To(ContainSubstring("--listen"))
+		Expect(sendLine).NotTo(ContainSubstring("--host"))
+		Expect(recvLine).NotTo(ContainSubstring("--listen"))
+		Expect(recvLine).To(ContainSubstring("--host " + srcHostLiteral))
+	})
+
 })
+
+// findLineContaining returns the first line of s that contains needle, or
+// "" if no such line exists. Used by tests that grep cbcopy debug output.
+func findLineContaining(s, needle string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return ""
+}
