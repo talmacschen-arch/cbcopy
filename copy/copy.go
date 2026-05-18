@@ -311,6 +311,24 @@ func (app *Application) doCopy() {
 			continue
 		}
 
+		// --skip-existing: drop already-on-destination pairs from the parallel
+		// src/dest arrays before TableMap is built. TableMap is consumed by
+		// RestoreCleanup at the tail of restorePredata, which re-sends every
+		// remaining tabMap entry into the data channel as a "DDL was a no-op,
+		// still need data copy" fallback. Filtering only inside MigrateMetadata
+		// (where this used to live) is too late: TableMap is already frozen,
+		// so RestoreCleanup picks up the to-be-skipped tables anyway and the
+		// flag is effectively a no-op for any --full / --dbname / --schema
+		// copy. partNameMap (dest root FQN -> dest leaf FQNs) lets the filter
+		// recognise leaves whose root is already on dest, matching the DDL
+		// filter's walkToRoot semantics; without it, missing leaves are kept
+		// here, escape the DDL filter (which would have skipped them via
+		// root-exists), and crash the data copy with "relation does not
+		// exist". See issue #34.
+		if utils.MustGetFlagBool(option.SKIP_EXISTING) {
+			srcTables, destTables = filterTablePairsByDestExisting(srcDbName, destDbName, srcTables, destTables, partNameMap)
+		}
+
 		metaManager := NewMetadataManager(srcMetaConn, destMetaConn, app.queryManager, app.queryWrapper,
 			app.needGlobalMetaData(i == 0), utils.MustGetFlagBool(option.METADATA_ONLY),
 			app.timestamp, partNameMap, app.queryWrapper.FormUserTableMap(srcTables, destTables),
