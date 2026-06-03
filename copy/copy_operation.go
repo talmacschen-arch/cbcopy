@@ -131,8 +131,14 @@ func (op *CopyOperation) Execute(timestamp string) error {
 	var copyErr error
 	donec := make(chan struct{})
 
-	// Start copy from operation in a separate goroutine
-	if op.connectionMode == option.ConnectionModePush || op.command.IsMasterCopy() {
+	// Direction is determined solely by --connection-mode: push → src dials
+	// dest, dest listens; pull → dest dials src, src listens. This applies
+	// uniformly to every copy strategy including CopyOnMaster.
+	isPush := op.connectionMode == option.ConnectionModePush
+
+	// Start the listener side in a goroutine so it is ready before the
+	// dialer side runs in the foreground below.
+	if isPush {
 		go op.executeCopyFrom(donec, &fromRows, &copyErr)
 	} else {
 		go op.executeCopyTo(donec, &toRows, &copyErr)
@@ -140,7 +146,7 @@ func (op *CopyOperation) Execute(timestamp string) error {
 
 	// Wait for helper ports, checking for CopyFrom errors during wait
 	var manageConn *dbconn.DBConn
-	if op.connectionMode == option.ConnectionModePush || op.command.IsMasterCopy() {
+	if isPush {
 		manageConn = op.destManageConn
 	} else {
 		manageConn = op.srcManageConn
@@ -152,8 +158,9 @@ func (op *CopyOperation) Execute(timestamp string) error {
 		return op.handleFailure(donec, err, copyErr)
 	}
 
-	// Execute copy to operation
-	if op.connectionMode == option.ConnectionModePush || op.command.IsMasterCopy() {
+	// Execute the dialer side in the foreground using the helper ports
+	// just retrieved from the listener side.
+	if isPush {
 		toRows, err = op.command.CopyTo(op.srcConn, op.srcTable, helperPorts, op.cmdID)
 	} else {
 		fromRows, err = op.command.CopyFrom(op.destConn, op.ctx, op.destTable, helperPorts, op.cmdID)

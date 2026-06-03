@@ -112,6 +112,8 @@ cbcopy relies on the "COPY ON SEGMENT" command of the database, so it has specif
 
 **Problem**: When you specify a hostname (e.g., `--dest-host=dest-warehouse-cluster`) instead of an IP address, all nodes in the source cluster must be able to resolve this hostname to the correct IP address. If the hostname resolution fails on any source cluster node, the migration will fail with errors such as `could not write to copy program: Broken pipe` which can be triggered by network issues.
 
+The symmetric constraint applies under `--connection-mode=pull`: the value of `--source-host` must be reachable from the destination cluster nodes, since under pull mode it is the destination that initiates the data connection back to the source. Passing a loopback address like `127.0.0.1` for `--source-host` works only when cbcopy is invoked from a node that the destination cluster also sees as itself; for any real cross-cluster setup the source address must be one the destination can dial.
+
 #### `cbcopy_helper` Not Deployed
 
 **Common Issue**: A common oversight is forgetting to copy the `cbcopy_helper` binary to all nodes in both the source and destination clusters. This can lead to connection errors that may appear to be DNS or network-related issues.
@@ -332,7 +334,7 @@ Flags:
       --dbname strings                   The database(s) to be copied, separated by commas
       --debug                            Print debug log messages
       --dest-dbname strings              The database(s) in destination cluster to copy to, separated by commas
-      --dest-host string                 The host of destination cluster (default "127.0.0.1")
+      --dest-host string                 The host of destination cluster. Must be reachable from the source cluster under --connection-mode push. (default "127.0.0.1")
       --dest-port int                    The port of destination cluster (default 5432)
       --dest-schema strings              The schema(s) in destination database to copy to, separated by commas
       --dest-table strings               The renamed dest table(s) for include-table, separated by commas
@@ -354,7 +356,7 @@ Flags:
       --schema strings                   The schema(s) to be copied, separated by commas, in the format database.schema
       --schema-mapping-file string       Schema mapping file, The line format is "source_dbname.source_schema,dest_dbname.dest_schema"
       --skip-existing                    Skip copying a table if it already exists in the destination database
-      --source-host string               The host of source cluster (default "127.0.0.1")
+      --source-host string               The host of source cluster. Must be reachable from the destination cluster under --connection-mode pull. (default "127.0.0.1")
       --source-port int                  The port of source cluster (default 5432)
       --source-user string               The user of source cluster (default "gpadmin")
       --tablespace-mapping-file string   Tablespace mapping file, The line format is "source_tablespace_name,dest_tablespace_name"

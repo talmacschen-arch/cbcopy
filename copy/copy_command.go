@@ -30,10 +30,19 @@ type CopyBase struct {
 	CompArg              string
 }
 
+// FormMasterHelperAddress returns the (port, ip) pair of the master-side
+// helper listener. Under push mode, the listener is on dest master and is
+// reached via --dest-host; under pull mode it is on src master and is
+// reached via --source-host. In pull mode --source-host must be an address
+// reachable from the destination cluster.
 func (cc *CopyBase) FormMasterHelperAddress(ports []HelperPortInfo) (string, string) {
-	ip := utils.MustGetFlagString(option.DEST_HOST)
+	var ip string
+	if cc.ConnectionMode == option.ConnectionModePush {
+		ip = utils.MustGetFlagString(option.DEST_HOST)
+	} else { // ConnectionModePull
+		ip = utils.MustGetFlagString(option.SOURCE_HOST)
+	}
 	port := strconv.Itoa(int(ports[0].Port))
-
 	return port, ip
 }
 
@@ -126,11 +135,24 @@ type CopyOnMaster struct {
 // CopyTo is part of the CopyCommand interface.
 // It executes the COPY TO command to send data from the source database.
 // The specific implementation varies based on the copy strategy.
-func (com *CopyOnMaster) CopyTo(conn *dbconn.DBConn, table option.Table, ports []HelperPortInfo, cmdId string) (int64, error) {
+// formatCopyToCommand returns the SQL string CopyTo would execute. Split
+// from CopyTo so unit tests can assert on the generated command without a
+// live DB connection.
+func (com *CopyOnMaster) formatCopyToCommand(table option.Table, ports []HelperPortInfo, cmdId string) string {
+	if com.ConnectionMode == option.ConnectionModePull {
+		// pull: src master listens; dest master will dial in CopyFrom.
+		dataPortRange := utils.MustGetFlagString(option.DATA_PORT_RANGE)
+		return fmt.Sprintf(`COPY %v.%v TO PROGRAM 'cbcopy_helper %v --listen --seg-id -1 --cmd-id %v --data-port-range %v --direction send' CSV IGNORE EXTERNAL PARTITIONS`,
+			table.Schema, table.Name, com.CompArg, cmdId, dataPortRange)
+	}
+	// ConnectionModePush
 	port, ip := com.FormMasterHelperAddress(ports)
-	query := fmt.Sprintf(`COPY %v.%v TO PROGRAM 'cbcopy_helper %v --seg-id -1 --host %v --port %v --direction send' CSV IGNORE EXTERNAL PARTITIONS`,
+	return fmt.Sprintf(`COPY %v.%v TO PROGRAM 'cbcopy_helper %v --seg-id -1 --host %v --port %v --direction send' CSV IGNORE EXTERNAL PARTITIONS`,
 		table.Schema, table.Name, com.CompArg, ip, port)
+}
 
+func (com *CopyOnMaster) CopyTo(conn *dbconn.DBConn, table option.Table, ports []HelperPortInfo, cmdId string) (int64, error) {
+	query := com.formatCopyToCommand(table, ports, cmdId)
 	gplog.Debug("[Worker %v] Execute on master, COPY command of sending data: %v", com.WorkerId, query)
 	copied, err := conn.Exec(query, com.WorkerId)
 	gplog.Debug("[Worker %v] Finished executing query", com.WorkerId)
@@ -145,12 +167,24 @@ func (com *CopyOnMaster) CopyTo(conn *dbconn.DBConn, table option.Table, ports [
 // CopyFrom is part of the CopyCommand interface.
 // It executes the COPY FROM command to receive data into the destination database.
 // The specific implementation varies based on the copy strategy.
-func (com *CopyOnMaster) CopyFrom(conn *dbconn.DBConn, ctx context.Context, table option.Table, ports []HelperPortInfo, cmdId string) (int64, error) {
+// formatCopyFromCommand returns the SQL string CopyFrom would execute.
+// Split from CopyFrom so unit tests can assert on the generated command
+// without a live DB connection.
+func (com *CopyOnMaster) formatCopyFromCommand(table option.Table, ports []HelperPortInfo, cmdId string) string {
+	if com.ConnectionMode == option.ConnectionModePull {
+		// pull: dest master dials src master listener.
+		port, ip := com.FormMasterHelperAddress(ports)
+		return fmt.Sprintf(`COPY %v.%v FROM PROGRAM 'cbcopy_helper %v --seg-id -1 --host %v --port %v --direction receive' CSV`,
+			table.Schema, table.Name, com.CompArg, ip, port)
+	}
+	// ConnectionModePush
 	dataPortRange := utils.MustGetFlagString(option.DATA_PORT_RANGE)
-
-	query := fmt.Sprintf(`COPY %v.%v FROM PROGRAM 'cbcopy_helper %v --listen --seg-id -1 --cmd-id %v --data-port-range %v --direction receive' CSV`,
+	return fmt.Sprintf(`COPY %v.%v FROM PROGRAM 'cbcopy_helper %v --listen --seg-id -1 --cmd-id %v --data-port-range %v --direction receive' CSV`,
 		table.Schema, table.Name, com.CompArg, cmdId, dataPortRange)
+}
 
+func (com *CopyOnMaster) CopyFrom(conn *dbconn.DBConn, ctx context.Context, table option.Table, ports []HelperPortInfo, cmdId string) (int64, error) {
+	query := com.formatCopyFromCommand(table, ports, cmdId)
 	gplog.Debug("[Worker %v] Execute on master, COPY command of receiving data: %v", com.WorkerId, query)
 	copied, err := conn.ExecContext(ctx, query, com.WorkerId)
 	gplog.Debug("[Worker %v] Finished executing query", com.WorkerId)
